@@ -7,13 +7,22 @@ import time
 
 class TranscriptProcessor:
     def __init__(self, max_tokens=8000):
-        self.encoding = tiktoken.get_encoding("cl100k_base")
+        try:
+            import tiktoken
+            self.encoding = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            print("[WARN] tiktoken failed, using fallback")
+            self.encoding = None
+            
         self.max_tokens = max_tokens
         self.chunk_size = 2000
     
     def count_tokens(self, text: str) -> int:
         """Count tokens in text"""
-        return len(self.encoding.encode(text))
+        if self.encoding:
+            return len(self.encoding.encode(text))
+        # fallback approximation
+        return len(text) // 4
     
     def enhance_transcript_quality(self, transcript_json: Dict) -> Dict:
         """Enhance transcript quality before processing"""

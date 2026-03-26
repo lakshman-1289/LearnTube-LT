@@ -10,6 +10,10 @@ from routers.course_routes import router as course_router
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
+# Ensure HF_TOKEN is set
+if not os.getenv("HF_TOKEN"):
+    os.environ["HF_TOKEN"] = "your_token_here"
+
 app = FastAPI(
     title="LearnTube Modular Backend",
     version="2.0.0",
