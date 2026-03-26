@@ -1,0 +1,28 @@
+# FastAPI and server
+fastapi==0.119.0
+uvicorn[standard]==0.37.0
+python-multipart==0.0.6
+
+# Pydantic & Core Tools
+pydantic==2.12.1
+python-dotenv==1.0.0
+
+# HTTP Clients
+httpx==0.28.1
+requests==2.32.5
+aiohttp==3.9.1
+
+# Transcript Extraction (CRITICAL FIX)
+youtube-transcript-api==0.6.2
+yt-dlp==2025.9.26
+
+# Chapter Generation
+sentence-transformers==5.1.1
+scikit-learn==1.6.1
+numpy==2.0.2
+
+# Text Processing
+tiktoken==0.5.2
+
+# SSL fix
+certifi==2025.10.5
