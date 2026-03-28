@@ -42,7 +42,18 @@ def _get_transcript_youtube_api(video_id: str, lang="en"):
         try:
             transcript = transcript_list.find_manually_created_transcript([lang])
         except:
-            transcript = transcript_list.find_generated_transcript([lang])
+            try:
+                transcript = transcript_list.find_generated_transcript([lang])
+            except:
+                available_generated = list(transcript_list._generated_transcripts.keys())
+                if available_generated:
+                    transcript = transcript_list.find_generated_transcript(available_generated)
+                else:
+                    available_manual = list(transcript_list._manually_created_transcripts.keys())
+                    if available_manual:
+                        transcript = transcript_list.find_manually_created_transcript(available_manual)
+                    else:
+                        return None
 
         data = transcript.fetch()
 
@@ -146,10 +157,17 @@ def _get_transcript_ytdlp(video_id: str, lang="en"):
 
         # Fuzzy match for the requested language (e.g. 'en', 'en-US', 'en-GB')
         sub_url = None
+        detected_lang = lang
         for key in merged_subs.keys():
             if key == lang or key.startswith(lang + "-"):
                 sub_url = merged_subs[key][0]["url"]
+                detected_lang = key
                 break
+
+        if not sub_url and merged_subs:
+            # fallback to any available language
+            detected_lang = list(merged_subs.keys())[0]
+            sub_url = merged_subs[detected_lang][0]["url"]
 
         if not sub_url:
             return None
@@ -175,7 +193,7 @@ def _get_transcript_ytdlp(video_id: str, lang="en"):
             if segments:
                 return {
                     "source": "yt-dlp",
-                    "language": lang,
+                    "language": detected_lang,
                     "is_generated": True,
                     "segments": segments,
                     "transcript": clean_text(" ".join(s["text"] for s in segments)),
@@ -204,7 +222,7 @@ def _get_transcript_ytdlp(video_id: str, lang="en"):
             
             return {
                 "source": "yt-dlp",
-                "language": lang,
+                "language": detected_lang,
                 "is_generated": True,
                 "segments": segments,
                 "transcript": text_content,
@@ -242,15 +260,22 @@ def _get_video_title_ytdlp(video_id: str) -> str:
 
 # ---------------- ASR FALLBACK ----------------
 def _get_transcript_asr(video_id: str, lang="en") -> Optional[Dict[str, Any]]:
+    import sys
+    import shutil
+    
+    if not shutil.which("ffmpeg"):
+        print("[WARN] ffmpeg not found, skipping ASR fallback")
+        return None
+
     url = f"https://www.youtube.com/watch?v={video_id}"
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             raw_audio = os.path.join(temp_dir, "raw_audio.%(ext)s")
-            raw_audio_mp3 = os.path.join(temp_dir, "raw_audio.mp3")
+            raw_audio_mp3 = raw_audio.replace("%(ext)s", "mp3")
             trimmed_audio = os.path.join(temp_dir, "trimmed_audio.mp3")
 
             dl_cmd = [
-                "yt-dlp",
+                sys.executable, "-m", "yt_dlp",
                 "-x",
                 "--audio-format", "mp3",
                 "-o", raw_audio,
@@ -309,15 +334,21 @@ def extract_transcript(youtube_url: str, lang="en"):
     ]:
         result = func(video_id, lang)
         if result and result.get("segments"):
+            print(f"[INFO] Using transcript source: {result['source']}")
+            print(f"[INFO] Detected language: {result.get('language', lang)}")
             return _format_output(video_id, result, title)
 
+    print("[WARN] All methods failed to extract transcript.")
     return {
         "videoId": video_id,
         "title": title,
+        "metadata": {
+            "source": "none",
+            "language": lang,
+            "is_generated": False,
+        },
         "segments": [],
         "transcript": "",
-        "metadata": {"source": "none"},
-        "error": "All methods failed"
     }
 
 

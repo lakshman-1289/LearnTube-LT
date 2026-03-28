@@ -31,14 +31,44 @@ class CourseGenerator:
         """
         # Step 1: Get detailed analysis data from DeepSeek
         analysis_prompt = f"""
-Analyze this YouTube video transcript and create comprehensive educational content.
+You are an expert course creator.
 
-Provide detailed, well-structured content with:
-- Main topics that are specific and descriptive
-- Key concepts with detailed explanations (2-3 sentences each)
-- Examples and demonstrations with practical details
-- Quiz questions with 4 realistic answer options and correct answers
-- Learning objectives that are specific and measurable
+### 🎯 Goal
+Generate a structured course in **clear English**, regardless of the input language.
+
+### ⚠️ Language Rule (VERY IMPORTANT)
+* The input transcript may be in ANY language (Hindi, Telugu, Tamil, etc.)
+* You MUST:
+  * Understand the original language
+  * Translate internally
+  * Generate ALL output strictly in **English**
+❌ Do NOT output any non-English text
+❌ Do NOT mix languages
+❌ Do NOT include original sentences
+
+### 📘 Course Requirements
+1. Use simple, beginner-friendly English
+2. Explain concepts with intuition (not dictionary definitions)
+3. Avoid repetition
+4. Add real-world examples
+5. Maintain logical flow between topics
+
+### 🧠 Teaching Style
+* Focus on:
+  * Why it matters
+  * How it works
+  * When to use it
+* Avoid:
+  * "What is..." type definitions
+  * Copy-paste from transcript
+
+### 📝 Quiz Rules
+Generate 5 questions:
+* 2 conceptual (why/how)
+* 2 scenario-based
+* 1 tricky/misconception
+❌ No direct definition questions
+❌ No "what is..." questions
 
 Return a JSON object with this exact structure:
 {{
@@ -75,8 +105,11 @@ Return a JSON object with this exact structure:
   }}
 }}
 
-Transcript:
+### 📦 Input:
 {content}
+
+### 📤 Output:
+Well-structured course in English only, adhering strictly to the JSON format.
 """
         
         try:
@@ -123,14 +156,44 @@ Transcript:
     async def _analyze_chunk(self, chunk: str, chunk_num: int, total_chunks: int, video_title: str) -> Dict:
         print(f"\n--- Sending chunk {chunk_num}/{total_chunks} ---\n{chunk[:500]}\n...\n", file=sys.stderr)
         prompt = f"""
-Analyze this segment ({chunk_num}/{total_chunks}) of an educational video transcript.
+You are an expert course creator.
 
-Extract and return JSON with detailed content:
-- Main topics covered (specific and descriptive)
-- Key concepts explained (detailed explanations)
-- Examples or demonstrations (practical details)
-- Quiz questions with 4 realistic options and correct answers
-- Learning objectives (specific and measurable)
+### 🎯 Goal
+Generate a structured course segment in **clear English**, regardless of the input language.
+
+### ⚠️ Language Rule (VERY IMPORTANT)
+* The input transcript segment may be in ANY language.
+* You MUST:
+  * Understand the original language
+  * Translate internally
+  * Generate ALL output strictly in **English**
+❌ Do NOT output any non-English text
+❌ Do NOT mix languages
+❌ Do NOT include original sentences
+
+### 📘 Course Requirements
+1. Use simple, beginner-friendly English
+2. Explain concepts with intuition (not dictionary definitions)
+3. Avoid repetition
+4. Add real-world examples
+5. Maintain logical flow between topics
+
+### 🧠 Teaching Style
+* Focus on:
+  * Why it matters
+  * How it works
+  * When to use it
+* Avoid:
+  * "What is..." type definitions
+  * Copy-paste from transcript
+
+### 📝 Quiz Rules
+Generate questions following these rules:
+* 2 conceptual (why/how)
+* 2 scenario-based
+* 1 tricky/misconception
+❌ No direct definition questions
+❌ No "what is..." questions
 
 Return JSON with this structure:
 {{
@@ -148,7 +211,11 @@ Return JSON with this structure:
   "learning_objectives": ["Specific, measurable objective"]
 }}
 
-Segment: {chunk}
+### 📦 Input Segment ({chunk_num}/{total_chunks}):
+{chunk}
+
+### 📤 Output:
+Well-structured course segment in English only, adhering strictly to the JSON format.
 """
         print(f"Prompt for chunk {chunk_num}: {prompt[:300]}...", file=sys.stderr)
         
@@ -173,6 +240,19 @@ Segment: {chunk}
                 "original_text": chunk
             }
     
+    def _remove_duplicates_safe(self, items: List) -> List:
+        unique = []
+        seen = set()
+        for item in items:
+            if isinstance(item, (dict, list)):
+                val = json.dumps(item, sort_keys=True)
+            else:
+                val = str(item)
+            if val not in seen:
+                unique.append(item)
+                seen.add(val)
+        return unique
+
     async def _synthesize_course_from_chunks(self, chunk_analyses: List[Dict], video_title: str) -> Dict:
         """
         Combine chunk analyses into final course structure
@@ -186,26 +266,32 @@ Segment: {chunk}
         
         for chunk in chunk_analyses:
             analysis = chunk.get("analysis", {})
-            combined_main_topics.extend(analysis.get("main_topics", []))
-            combined_key_concepts.extend(analysis.get("key_concepts", []))
-            combined_examples.extend(analysis.get("examples_demonstrations", []))
-            combined_quiz_questions.extend(analysis.get("quiz_questions", []))  # Updated field name
-            combined_learning_objectives.extend(analysis.get("learning_objectives", []))
+            if not isinstance(analysis, dict):
+                continue
+            combined_main_topics.extend(analysis.get("main_topics", []) if isinstance(analysis.get("main_topics"), list) else [])
+            combined_key_concepts.extend(analysis.get("key_concepts", []) if isinstance(analysis.get("key_concepts"), list) else [])
+            combined_examples.extend(analysis.get("examples_demonstrations", []) if isinstance(analysis.get("examples_demonstrations"), list) else [])
+            combined_quiz_questions.extend(analysis.get("quiz_questions", []) if isinstance(analysis.get("quiz_questions"), list) else [])
+            combined_learning_objectives.extend(analysis.get("learning_objectives", []) if isinstance(analysis.get("learning_objectives"), list) else [])
         
         # Remove duplicates while preserving order
-        combined_main_topics = list(dict.fromkeys(combined_main_topics))
-        combined_key_concepts = list(dict.fromkeys(combined_key_concepts))
-        combined_examples = list(dict.fromkeys(combined_examples))
+        combined_main_topics = self._remove_duplicates_safe(combined_main_topics)
+        combined_key_concepts = self._remove_duplicates_safe(combined_key_concepts)
+        combined_examples = self._remove_duplicates_safe(combined_examples)
+        
         # For quiz questions, we need to handle the new structure
         unique_quiz_questions = []
         seen_questions = set()
         for quiz in combined_quiz_questions:
-            question_text = quiz.get("question", "")
+            if isinstance(quiz, dict):
+                question_text = str(quiz.get("question", quiz))
+            else:
+                question_text = str(quiz)
             if question_text not in seen_questions:
                 unique_quiz_questions.append(quiz)
                 seen_questions.add(question_text)
         combined_quiz_questions = unique_quiz_questions
-        combined_learning_objectives = list(dict.fromkeys(combined_learning_objectives))
+        combined_learning_objectives = self._remove_duplicates_safe(combined_learning_objectives)
         
         # Create combined analysis structure
         combined_analysis = {
