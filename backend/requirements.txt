@@ -26,3 +26,9 @@ tiktoken==0.5.2
 
 # SSL fix
 certifi
+
+# NEW (for ASR fallback)
+faster-whisper>=1.0.0
+
+# Optional but recommended (if using ffmpeg via python)
+ffmpeg-python>=0.2.0

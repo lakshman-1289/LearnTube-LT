@@ -240,6 +240,61 @@ def _get_video_title_ytdlp(video_id: str) -> str:
     return ""
 
 
+# ---------------- ASR FALLBACK ----------------
+def _get_transcript_asr(video_id: str, lang="en") -> Optional[Dict[str, Any]]:
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            raw_audio = os.path.join(temp_dir, "raw_audio.%(ext)s")
+            raw_audio_mp3 = os.path.join(temp_dir, "raw_audio.mp3")
+            trimmed_audio = os.path.join(temp_dir, "trimmed_audio.mp3")
+
+            dl_cmd = [
+                "yt-dlp",
+                "-x",
+                "--audio-format", "mp3",
+                "-o", raw_audio,
+                url
+            ]
+            subprocess.run(dl_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+            trim_cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", raw_audio_mp3,
+                "-t", "600",
+                "-c", "copy",
+                trimmed_audio
+            ]
+            subprocess.run(trim_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+            from faster_whisper import WhisperModel
+            model = WhisperModel("tiny", compute_type="int8")
+            segments_gen, _ = model.transcribe(trimmed_audio)
+
+            segments = []
+            for seg in segments_gen:
+                if seg.text and seg.text.strip():
+                    segments.append({
+                        "start": seg.start,
+                        "text": seg.text.strip()
+                    })
+
+            if not segments:
+                return None
+
+            return {
+                "source": "asr_fallback",
+                "language": lang,
+                "is_generated": True,
+                "segments": segments,
+                "transcript": clean_text(" ".join(s["text"] for s in segments)),
+            }
+    except Exception as e:
+        print(f"[ERROR] asr_fallback: {e}")
+        return None
+
+
 # ---------------- MAIN FUNCTION ----------------
 def extract_transcript(youtube_url: str, lang="en"):
 
@@ -250,6 +305,7 @@ def extract_transcript(youtube_url: str, lang="en"):
         _get_transcript_youtube_api,
         _get_transcript_timedtext,
         _get_transcript_ytdlp,
+        _get_transcript_asr,
     ]:
         result = func(video_id, lang)
         if result and result.get("segments"):
