@@ -26,7 +26,8 @@ class GroqClient:
         max_tokens: int = 4000,
         temperature: float = 0.2,
         response_format: Optional[Dict] = None,
-        model: str = "llama-3.3-70b-versatile"
+        model: str = "llama-3.3-70b-versatile",
+        pydantic_model=None
     ) -> str:
         """
         Send chat completion request to Groq API
@@ -40,6 +41,18 @@ class GroqClient:
             "Content-Type": "application/json"
         }
 
+        # Automatically inject JSON schema instructions to guide the model if a pydantic model is provided
+        if pydantic_model:
+            import json
+            schema_dump = json.dumps(pydantic_model.model_json_schema())
+            schema_instruction = f" You MUST return a JSON object that strictly adheres to this JSON schema: {schema_dump}. Do not include markdown formatting or extra text."
+            
+            system_msg_idx = next((i for i, m in enumerate(messages) if m["role"] == "system"), -1)
+            if system_msg_idx >= 0:
+                messages[system_msg_idx]["content"] += schema_instruction
+            else:
+                messages.insert(0, {"role": "system", "content": f"You are a strict JSON data generator.{schema_instruction}"})
+
         payload = {
             "model": model,
             "messages": messages,
@@ -52,7 +65,7 @@ class GroqClient:
             payload["response_format"] = response_format
 
         max_retries = 3
-        base_delay = 2
+        base_delay = 5
 
         for attempt in range(max_retries):
 
@@ -82,8 +95,34 @@ class GroqClient:
                             raise Exception("Empty response from Groq")
 
                         print(f"✅ Received response ({len(content)} characters)")
+                        
+                        content = content.strip()
+                        
+                        # Apply Pydantic validation if a schema is provided
+                        if pydantic_model:
+                            try:
+                                # First we check if it is parseable json
+                                import json
+                                json_parsed = json.loads(content)
+                                # Then validate
+                                validated = pydantic_model(**json_parsed)
+                                return validated
+                            except Exception as e:
+                                print(f"⚠️ Pydantic validation failed: {str(e)}")
+                                # Optionally append the error to messages for the next retry
+                                messages.append({
+                                    "role": "assistant",
+                                    "content": content
+                                })
+                                messages.append({
+                                    "role": "user",
+                                    "content": f"Your previous response failed validation: {str(e)}. Please fix the JSON and follow the schema strictly."
+                                })
+                                if attempt == max_retries - 1:
+                                    raise Exception(f"Failed to match Pydantic schema: {str(e)}")
+                                continue
 
-                        return content.strip()
+                        return content
 
                     elif response.status == 429:
                         wait = base_delay ** (attempt + 1)

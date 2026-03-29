@@ -32,3 +32,6 @@ faster-whisper>=1.0.0
 
 # Optional but recommended (if using ffmpeg via python)
 ffmpeg-python>=0.2.0
+
+# Database
+motor>=3.3.2

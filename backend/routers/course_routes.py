@@ -4,8 +4,8 @@ import os
 from services.transcript_service import extract_transcript
 from services.chapter_service import generate_chapters
 from course_generator.src.core.courseGenerator import CourseGenerator
-from course_generator.src.core.transcript_processor import TranscriptProcessor
 from course_generator.src.core.groq_client import GroqClient
+from services.db_service import db_service
 
 router = APIRouter()
 
@@ -15,9 +15,8 @@ def log(msg):
 @router.post("/generate-course-from-youtube")
 async def generate_course_from_youtube(body: dict):
     """
-    Extract transcript -> generate chapters -> generate course.
+    Check cache -> Extract transcript -> generate chapters -> generate course -> cache.
     Returns the combined response with chapters and course data.
-    Wrapped safely for production.
     """
     try:
         url = body.get("url") or body.get("youtube_url")
@@ -26,6 +25,26 @@ async def generate_course_from_youtube(body: dict):
 
         log(f"Processing video: {url}")
         
+        # We need video ID for cache check. Simplistic extraction.
+        # In production this might use a safer regex.
+        import re
+        video_id_match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url)
+        video_id = video_id_match.group(1) if video_id_match else url
+
+        # 0. Check MongoDB Cache First
+        cached_course = await db_service.get_cached_course(video_id)
+        if cached_course:
+            log("Returning cached course early.")
+            return {
+                "success": True,
+                "course_data": cached_course.get("course_data"),
+                "processing_stats": {"cache_hit": True},
+                "video_id": cached_course.get("video_id"),
+                "title": cached_course.get("title"),
+                "transcript_length": cached_course.get("transcript_length"),
+                "chapters": cached_course.get("chapters", []),
+            }
+
         # 1. Extract transcript and segments
         log("Extracting transcript...")
         transcript_result = extract_transcript(url)
@@ -55,10 +74,10 @@ async def generate_course_from_youtube(body: dict):
         log("Generating chapters...")
         segments = transcript_result.get("segments", [])
         chapters = generate_chapters(segments) if segments else []
+        chapter_data = [{"title": c.title, "time": c.time} for c in chapters]
 
-        # 3. Generate Course using CourseGenerator
+        # 3. Generate Course pipeline using CourseGenerator Orchestrator
         log("Generating course...")
-        processor = TranscriptProcessor()
         groq_api_key = os.getenv("GROQ_API_KEY")
         if not groq_api_key:
             raise Exception("GROQ_API_KEY not found in environment variables.")
@@ -66,14 +85,13 @@ async def generate_course_from_youtube(body: dict):
         groq_client = None
         try:
             groq_client = GroqClient(api_key=groq_api_key)
-            course_generator = CourseGenerator(groq_client, processor)
+            course_generator = CourseGenerator(groq_client)
             
-            transcript_json = {"content": transcript_text}
-            if not processor.validate_transcript(transcript_json):
-                raise Exception("Invalid transcript content after extraction")
-            
-            enhanced_transcript = processor.enhance_transcript_quality(transcript_json)
-            course_data = await course_generator.generate_complete_course(enhanced_transcript, transcript_result["title"])
+            course_data = await course_generator.generate_complete_course(
+                transcript_text=transcript_text,
+                video_title=transcript_result["title"],
+                video_url=url
+            )
             
             if isinstance(course_data, dict) and "error" in course_data:
                 raise Exception(course_data.get("error", "Course generation failed"))
@@ -84,16 +102,27 @@ async def generate_course_from_youtube(body: dict):
             if groq_client and hasattr(groq_client, 'session') and groq_client.session:
                 await groq_client.session.close()
 
-        # 4. Return combined response
+        # 4. Save to DB Cache
+        transcript_len = len(transcript_text)
+        await db_service.cache_course(
+            video_id=transcript_result["videoId"],
+            youtube_url=url,
+            title=transcript_result["title"],
+            transcript_length=transcript_len,
+            chapters=chapter_data,
+            course_data=course_data
+        )
+
+        # 5. Return combined response
         log("Course generation successful.")
         result = {
             "success": True,
             "course_data": course_data,
-            "processing_stats": None,
+            "processing_stats": {"cache_hit": False},
             "video_id": transcript_result["videoId"],
             "title": transcript_result["title"],
-            "transcript_length": len(transcript_text),
-            "chapters": [{"title": c.title, "time": c.time} for c in chapters],
+            "transcript_length": transcript_len,
+            "chapters": chapter_data,
         }
         return result
 
