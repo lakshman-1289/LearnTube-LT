@@ -34,22 +34,44 @@ class CourseGenerator:
             lesson_plan = await self.lesson_planner.plan_lessons(topics)
             print(f"[PIPELINE] ✅ Planned {len(lesson_plan.lessons)} lessons.")
             
+            from course_generator.src.pipeline.chunking_service import chunking_service
+            import math
+            import asyncio
+            
+            chunks = chunking_service.chunk_transcript(transcript_text)
+            
             lesson_contents = []
             lesson_quizzes = []
 
             # We process contents and quizzes sequentially (or concurrently if we used asyncio.gather)
             for i, lesson_outline in enumerate(lesson_plan.lessons):
                 print(f"[PIPELINE] 📖 Generating content for Lesson {i+1}/{len(lesson_plan.lessons)}: {lesson_outline.title}")
+                
+                # Linearly map the lesson index to a chunk to keep requests under TPM limits
+                chunk_index = math.floor((i / max(len(lesson_plan.lessons), 1)) * len(chunks))
+                chunk_index = min(chunk_index, len(chunks) - 1)
+                
+                # Combine current chunk and the next one to ensure conceptual boundaries aren't heavily cut
+                context_chunks = [chunks[chunk_index]]
+                if chunk_index < len(chunks) - 1:
+                    context_chunks.append(chunks[chunk_index + 1])
+                mapped_transcript_context = " ".join(context_chunks)
+                
                 content = await self.content_generator.generate_lesson_content(
                     lesson_title=lesson_outline.title,
                     lesson_subtitle=lesson_outline.subtitle,
-                    transcript_context=transcript_text # Given the boundaries of the prompt, the agent will filter context. Alternatively, pass specific chunks if known.
+                    transcript_context=mapped_transcript_context # Passing contextual chunks instead of full 30k str
                 )
                 lesson_contents.append(content)
                 
                 print(f"[PIPELINE] 🧠 Generating quizzes for Lesson {i+1}")
                 quizzes = await self.quiz_generator.generate_quizzes(content)
                 lesson_quizzes.append(quizzes)
+                
+                # Add delay to respect Groq free tier limit of 12000 TPM
+                if i < len(lesson_plan.lessons) - 1:
+                    print("[PIPELINE] ⏱️ Sleeping 15s to keep Groq TPM boundaries safe...")
+                    await asyncio.sleep(15)
 
             print("[PIPELINE] 🏗️ Assembling Final Course JSON...")
             final_course: FinalCourse = CourseAssembler.assemble_final_course(
