@@ -1,5 +1,5 @@
 from typing import Dict
-from course_generator.src.core.groq_client import GroqClient
+from llm.base import BaseLLMProvider
 from course_generator.src.pipeline.topic_extractor import TopicExtractor
 from course_generator.src.pipeline.lesson_planner import LessonPlanner
 from course_generator.src.pipeline.content_generator import ContentGenerator
@@ -12,8 +12,8 @@ class CourseGenerator:
     Acts as the Orchestrator for the entire course generation pipeline.
     Linearly processes nodes: Topic -> Lesson -> Content -> Quizzes -> Assembly
     """
-    def __init__(self, groq_client: GroqClient):
-        self.client = groq_client
+    def __init__(self, llm_client: BaseLLMProvider):
+        self.client = llm_client
         
         # Initialize specialized agents
         self.topic_extractor = TopicExtractor(self.client)

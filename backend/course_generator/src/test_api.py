@@ -12,8 +12,8 @@ from models.schemas import CourseGeneratorInput
 
 # Now import your modules
 from course_generator.src.core.transcript_processor import TranscriptProcessor
-from course_generator.src.core.groq_client import GroqClient  # Your new Groq wrapper
 from course_generator.src.core.courseGenerator import CourseGenerator
+from llm.factory import LLMFactory
 
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -40,8 +40,8 @@ class CourseResponse(BaseModel):
 
 # Initialize components
 processor = TranscriptProcessor()
-client = GroqClient(api_key=os.getenv("GROQ_API_KEY"))
-course_generator = CourseGenerator(client, processor)
+client = LLMFactory.create_provider()
+course_generator = CourseGenerator(client)
 
 @app.post("/generate-course", response_model=CourseResponse)
 async def generate_course_from_transcript(transcript: CourseGeneratorInput):
@@ -91,11 +91,13 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "Course Generator API"}
 
-@app.post("/test-groq")
-async def test_groq_connection():
+@app.post("/test-llm")
+async def test_llm_connection():
     try:
-        # Mock or real Groq call
-        return {"success": True, "response": "Groq API reachable", "provider": "Groq"}
+        # Check if the provider has a test connection module
+        if hasattr(client, 'test_connection') and callable(client.test_connection):
+            return await client.test_connection()
+        return {"success": True, "response": "LLM API reachable", "provider": "LLMFactory"}
     except Exception as e:
         print("ERROR OCCURRED:")
         traceback.print_exc()

@@ -1,11 +1,11 @@
 from typing import Dict
 from models.pipeline_schemas import TopicList
-from course_generator.src.core.groq_client import GroqClient
-from course_generator.src.pipeline.prompts import Prompts
+from llm.base import BaseLLMProvider
+from llm.prompt_manager import PromptManager
 
 class TopicExtractor:
-    def __init__(self, groq_client: GroqClient):
-        self.client = groq_client
+    def __init__(self, llm_client: BaseLLMProvider):
+        self.client = llm_client
 
     async def extract_topics(self, transcript_text: str) -> TopicList:
         """
@@ -20,25 +20,23 @@ class TopicExtractor:
         
         for i, chunk in enumerate(chunks):
             print(f"[PIPELINE] 🧩 Extracting topics from chunk {i+1}/{len(chunks)}...")
-            prompt = Prompts.TOPIC_EXTRACTION.format(transcript=chunk)
+            prompt = PromptManager.get_prompt("TOPIC_EXTRACTION", transcript=chunk)
             
             messages = [{"role": "user", "content": prompt}]
             
-            # We request strict JSON formatting enforcing TopicList structure
-            result: TopicList = await self.client.chat_completion(
+            # Utilizing the Provider-Agnostic Structured Output interface
+            result: TopicList = await self.client.generate_structured_output(
                 messages=messages,
+                pydantic_schema=TopicList,
                 max_tokens=2000,
-                temperature=0.2,
-                response_format={"type": "json_object"},
-                model="llama-3.3-70b-versatile",
-                pydantic_model=TopicList
+                temperature=0.2
             )
             
             all_topics.extend(result.topics)
             
-            # Stay under 12k TPM rate limits roughly
+            # Stay under TPM limits if necessary based on model speed
             if i < len(chunks) - 1:
-                print("[PIPELINE] ⏱️ Sleeping 12s to respect API rate limits...")
-                await asyncio.sleep(12)
+                print("[PIPELINE] ⏱️ Sleeping briefly to respect dynamically scaled API rate limits...")
+                await asyncio.sleep(5)
                 
         return TopicList(topics=all_topics)

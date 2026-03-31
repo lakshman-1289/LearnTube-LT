@@ -4,7 +4,7 @@ import os
 from services.transcript_service import extract_transcript
 from services.chapter_service import generate_chapters
 from course_generator.src.core.courseGenerator import CourseGenerator
-from course_generator.src.core.groq_client import GroqClient
+from llm.factory import LLMFactory
 from services.db_service import db_service
 
 router = APIRouter()
@@ -78,14 +78,11 @@ async def generate_course_from_youtube(body: dict):
 
         # 3. Generate Course pipeline using CourseGenerator Orchestrator
         log("Generating course...")
-        groq_api_key = os.getenv("GROQ_API_KEY")
-        if not groq_api_key:
-            raise Exception("GROQ_API_KEY not found in environment variables.")
             
-        groq_client = None
+        llm_client = None
         try:
-            groq_client = GroqClient(api_key=groq_api_key)
-            course_generator = CourseGenerator(groq_client)
+            llm_client = LLMFactory.create_provider()
+            course_generator = CourseGenerator(llm_client)
             
             course_data = await course_generator.generate_complete_course(
                 transcript_text=transcript_text,
@@ -99,8 +96,8 @@ async def generate_course_from_youtube(body: dict):
         except Exception as e:
             raise Exception(f"Course generation failed: {str(e)}")
         finally:
-            if groq_client and hasattr(groq_client, 'session') and groq_client.session:
-                await groq_client.session.close()
+            if llm_client:
+                await llm_client.async_close()
 
         # 4. Save to DB Cache
         transcript_len = len(transcript_text)

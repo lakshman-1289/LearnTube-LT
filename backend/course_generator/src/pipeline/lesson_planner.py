@@ -1,28 +1,26 @@
 import json
 from models.pipeline_schemas import LessonPlan, TopicList
-from course_generator.src.core.groq_client import GroqClient
-from course_generator.src.pipeline.prompts import Prompts
+from llm.base import BaseLLMProvider
+from llm.prompt_manager import PromptManager
 
 class LessonPlanner:
-    def __init__(self, groq_client: GroqClient):
-        self.client = groq_client
+    def __init__(self, llm_client: BaseLLMProvider):
+        self.client = llm_client
 
     async def plan_lessons(self, topics: TopicList) -> LessonPlan:
         """
         Plans lessons from an extracted topic list.
         """
         topics_json = topics.model_dump_json(indent=2)
-        prompt = Prompts.LESSON_PLANNER.format(topics_json=topics_json)
+        prompt = PromptManager.get_prompt("LESSON_PLANNER", topics_json=topics_json)
         
         messages = [{"role": "user", "content": prompt}]
         
-        result: LessonPlan = await self.client.chat_completion(
+        result: LessonPlan = await self.client.generate_structured_output(
             messages=messages,
+            pydantic_schema=LessonPlan,
             max_tokens=2500,
-            temperature=0.3, # slightly higher for creativity on titles
-            response_format={"type": "json_object"},
-            model="llama-3.3-70b-versatile",
-            pydantic_model=LessonPlan
+            temperature=0.3
         )
         
         return result

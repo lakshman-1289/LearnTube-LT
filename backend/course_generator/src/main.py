@@ -9,8 +9,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from course_generator.src.core.transcript_processor import TranscriptProcessor
-from course_generator.src.core.groq_client import GroqClient
 from course_generator.src.core.courseGenerator import CourseGenerator
+from llm.factory import LLMFactory
 
 # Load environment variables
 env_path = Path(__file__).parent.parent.parent / ".env"
@@ -22,8 +22,8 @@ async def generate_course_from_transcript(transcript_content: str) -> dict:
     """
     # Initialize components
     processor = TranscriptProcessor()
-    groq_client = GroqClient(api_key=os.getenv("GROQ_API_KEY"))
-    course_generator = CourseGenerator(groq_client, processor)
+    llm_client = LLMFactory.create_provider()
+    course_generator = CourseGenerator(llm_client)
     
     # Prepare transcript JSON
     transcript_json = {"content": transcript_content}
@@ -41,9 +41,6 @@ async def generate_course_from_transcript(transcript_content: str) -> dict:
         return course_data
     except Exception as e:
         raise Exception(f"Course generation failed: {str(e)}")
-    finally:
-        if hasattr(groq_client, 'session') and groq_client.session:
-            await groq_client.session.close()
 
 async def main():
     """
